@@ -43,6 +43,16 @@ All demo accounts use the password `demo2026`.
 
 The demo school, Adom Heights Academy, is fictional. Its data is generated from a fixed seed, so it is the same each time. It covers the 2025/2026 year in full and the 2026/2027 1st term up to 21 October 2026: 282 students across Basic 7 to SHS 2, part payments and arrears, scholarships, repeats, transfers and withdrawals. Running `npm run db:seed` again replaces the demo school and leaves other schools alone.
 
+## Putting it online
+
+This is a server app with a database, so GitHub Pages cannot run it (Pages only serves static files, which is why it shows this README). To get a live link:
+
+1. Create a free PostgreSQL database on [Neon](https://neon.tech) and copy its connection string.
+2. Import this repository on [Vercel](https://vercel.com/new) and add `DATABASE_URL` with that connection string.
+3. Deploy. The `vercel-build` script creates the tables, loads the demo school and builds the app.
+
+Each deploy reloads the demo school, so changes made in the demo are reset.
+
 ## Commands
 
 | Command | What it does |
