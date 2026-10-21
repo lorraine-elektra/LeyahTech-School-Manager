@@ -1,0 +1,29 @@
+name: Authorship
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  authorship:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Check commit authors
+        if: github.event_name == 'push'
+        run: .github/scripts/check-authorship.sh "${{ github.event.before }}" "${{ github.sha }}"
+
+      - name: Check commit authors and pull request description
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          .github/scripts/check-authorship.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          if printf '%s' "$PR_BODY" | grep -qiE 'co-authored-by:.*claude|claude-session|generated with claude code'; then
+            echo "::error::The pull request description mentions Claude. Remove the Claude Code line from the description and re-run this check."
+            exit 1
+          fi
