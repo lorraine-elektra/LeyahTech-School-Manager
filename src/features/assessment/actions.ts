@@ -1,13 +1,16 @@
 'use server';
 
 import { sql } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { db } from '@/db/client';
 import { subjectScores } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { canEnterScores } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
+import { termLabel } from '@/features/school/calendar';
 import { CLASS_SCORE_MAX, EXAM_SCORE_MAX } from '@/features/school/grading';
+import { getClass } from '@/features/school/queries';
 import { classRoll } from '@/features/students/queries';
+import { schoolChanged } from '@/lib/revalidate';
 
 export interface ScoreFormState {
   error?: string;
@@ -66,6 +69,8 @@ export async function saveScores(schoolSlug: string, classId: string, subjectId:
         },
       });
   }
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  const [schoolClass, subject] = await Promise.all([getClass(viewer.school.id, classId), db.query.subjects.findFirst({ where: (s, { eq }) => eq(s.id, subjectId) })]);
+  await recordActivity(viewer, 'Scores', `Saved ${subject?.name ?? 'subject'} scores for ${schoolClass?.name ?? 'a class'}, ${termLabel(viewer.currentTerm)}`, `/scores/${classId}/${subjectId}`);
+  schoolChanged(viewer);
   return { savedAt: new Date().toISOString() };
 }

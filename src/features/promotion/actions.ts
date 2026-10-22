@@ -1,15 +1,16 @@
 'use server';
 
 import { and, eq } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { db } from '@/db/client';
 import { classes, enrolments, studentMovements, students } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { canManagePromotion } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
 import { getClass } from '@/features/school/queries';
-import { decisionOptions, isFinalYear, nextAcademicYear, nextClassName, type PromotionDecision } from './decisions';
+import { schoolChanged } from '@/lib/revalidate';
 import { promotionRows } from './data';
+import { decisionOptions, isFinalYear, nextAcademicYear, nextClassName, type PromotionDecision } from './decisions';
 
 export interface PromotionFormState {
   error?: string;
@@ -75,6 +76,7 @@ export async function confirmPromotion(schoolSlug: string, classId: string, _pre
       }
     }
   });
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  await recordActivity(viewer, 'Promotion', `Confirmed promotion for ${schoolClass.name}, ${schoolClass.academicYear}`, `/promotion?class=${classId}`);
+  schoolChanged(viewer);
   redirect(`/${schoolSlug}/promotion?class=${classId}&confirmed=1`);
 }

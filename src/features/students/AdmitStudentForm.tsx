@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { guardianRelationships, personTitles } from '@/features/school/people';
 import type { SchoolClass } from '@/features/school/types';
 import type { StudentFormState } from './actions';
 
@@ -88,7 +89,7 @@ export function AdmitStudentForm({ action, classes, today }: { action: (state: S
               <span>Title</span>
               <select name="guardianTitle" defaultValue={v.guardianTitle ?? ''}>
                 <option value="">Choose</option>
-                {['Mr.', 'Mrs.', 'Ms.', 'Madam', 'Dr.', 'Rev.'].map((t) => (
+                {personTitles.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
               </select>
@@ -101,7 +102,7 @@ export function AdmitStudentForm({ action, classes, today }: { action: (state: S
               <span>Relationship</span>
               <select name="relationship" defaultValue={v.relationship ?? ''}>
                 <option value="">Choose</option>
-                {['Mother', 'Father', 'Aunt', 'Uncle', 'Grandmother', 'Guardian'].map((r) => (
+                {guardianRelationships.map((r) => (
                   <option key={r}>{r}</option>
                 ))}
               </select>

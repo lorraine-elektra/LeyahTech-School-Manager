@@ -6,7 +6,7 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ school: string }>;
-  searchParams: Promise<{ q?: string; class?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; class?: string; status?: string; page?: string }>;
 }) {
   const viewer = await requireViewer((await params).school);
   return <StudentsPage viewer={viewer} filters={await searchParams} />;

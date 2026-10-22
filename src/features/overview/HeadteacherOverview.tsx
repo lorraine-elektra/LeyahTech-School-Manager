@@ -1,40 +1,150 @@
 import Link from 'next/link';
+import { ActivityList } from '@/features/activity/ActivityList';
+import { activityPage } from '@/features/activity/queries';
 import { scoreSheetProgress } from '@/features/assessment/progress';
 import { sheetsOnDate } from '@/features/attendance/queries';
-import { totalsFromStatuses } from '@/features/attendance/summary';
+import { attendanceRate, totalsFromStatuses } from '@/features/attendance/summary';
 import type { Viewer } from '@/features/auth/session';
 import { summariseCollection } from '@/features/fees/accounts';
 import { schoolFeeAccounts } from '@/features/fees/queries';
 import { isSchoolDay, termLabel, todayIso } from '@/features/school/calendar';
 import { getClasses, getStaff } from '@/features/school/queries';
 import { staffName } from '@/features/staff/names';
-import { recentMovements } from '@/features/students/movements';
-import { admissionNoToSlug, studentRegisterName } from '@/features/students/names';
-import { listStudents, isEnrolledOn } from '@/features/students/queries';
-import { formatDate, formatDateWithDay, formatMoney, formatPercent, formatTime } from '@/ui/format';
+import { activeRollCounts } from '@/features/students/queries';
+import { BarList, Meter, toneForRate } from '@/ui/Charts';
+import { Icon } from '@/ui/Icon';
 import { PageHeader } from '@/ui/PageHeader';
 import { Section } from '@/ui/Section';
+import { formatDateWithDay, formatMoney, formatPercent, formatTime } from '@/ui/format';
+import { WeeklyCollections } from './WeeklyCollections';
+import { greeting } from './greeting';
 
 export async function HeadteacherOverview({ viewer }: { viewer: Viewer }) {
   const base = `/${viewer.school.slug}`;
   const today = todayIso();
   const { academicYear } = viewer.currentTerm;
-  const [classes, staff, sheets, feeRows, progress, movements, roll] = await Promise.all([
+  const [classes, staff, sheets, feeRows, progress, activity, rollCounts] = await Promise.all([
     getClasses(viewer.school.id, academicYear),
     getStaff(viewer.school.id),
     sheetsOnDate(viewer.school.id, today),
     schoolFeeAccounts(viewer),
     scoreSheetProgress(viewer),
-    recentMovements(viewer.school.id, 8),
-    listStudents(viewer.school.id, academicYear),
+    activityPage(viewer.school.id, { limit: 5 }),
+    activeRollCounts(viewer.school.id, academicYear, today),
   ]);
   const collection = summariseCollection(feeRows.map((r) => r.account));
+  const collectedShare = collection.due ? (collection.collected / collection.due) * 100 : 0;
+  const onRoll = [...rollCounts.values()].reduce((sum, n) => sum + n, 0);
+  const todayTotals = totalsFromStatuses(sheets.flatMap((s) => s.entries.map((e) => e.status)));
+  const todayRate = attendanceRate(todayTotals);
+  const sheetsEntered = progress.filter((p) => p.onRoll > 0 && p.classScoresEntered === p.onRoll).length;
+  const scoreShare = progress.length ? (sheetsEntered / progress.length) * 100 : 0;
+  const schoolDay = isSchoolDay(today);
+
+  const feeByClass = classes.map((schoolClass) => {
+    const summary = summariseCollection(feeRows.filter((r) => r.schoolClass?.id === schoolClass.id && r.student.status === 'Active').map((r) => r.account));
+    return { schoolClass, share: summary.due ? (summary.collected / summary.due) * 100 : 0 };
+  });
 
   return (
     <>
-      <PageHeader title="Overview" meta={`${termLabel(viewer.currentTerm)} · ${formatDateWithDay(today)}`} />
+      <PageHeader title={`Good ${greeting()}, ${viewer.staff?.title} ${viewer.staff?.surname}`} meta={`${termLabel(viewer.currentTerm)} · ${formatDateWithDay(today)}`} />
 
-      <Section title="Attendance today" aside={isSchoolDay(today) ? undefined : 'Not a school day'}>
+      <dl className="key-figures">
+        <div>
+          <dt>
+            <Icon name="students" size={14} /> Students on roll
+          </dt>
+          <dd>{onRoll}</dd>
+          <div className="key-figures__note">
+            {classes.length} classes · {staff.length} staff
+          </div>
+        </div>
+        <div>
+          <dt>
+            <Icon name="attendance" size={14} /> In school today
+          </dt>
+          <dd>{todayRate === undefined ? '-' : formatPercent(todayRate)}</dd>
+          <div style={{ marginTop: 8 }}>
+            <Meter value={todayRate ?? 0} tone={toneForRate(todayRate)} thin />
+          </div>
+          <div className="key-figures__note">
+            {schoolDay ? `${sheets.length} of ${classes.length} registers marked` : 'Not a school day'}
+          </div>
+        </div>
+        <div>
+          <dt>
+            <Icon name="fees" size={14} /> Fees collected
+          </dt>
+          <dd>{formatPercent(collectedShare)}</dd>
+          <div style={{ marginTop: 8 }}>
+            <Meter value={collectedShare} tone={toneForRate(collectedShare, 75, 50)} thin />
+          </div>
+          <div className="key-figures__note">
+            {formatMoney(collection.collected)} of {formatMoney(collection.due)}
+          </div>
+        </div>
+        <div>
+          <dt>
+            <Icon name="scores" size={14} /> Score sheets complete
+          </dt>
+          <dd>
+            {sheetsEntered} <span className="muted" style={{ fontSize: 14 }}>of {progress.length}</span>
+          </dd>
+          <div style={{ marginTop: 8 }}>
+            <Meter value={scoreShare} thin />
+          </div>
+          <div className="key-figures__note">Class scores for this term</div>
+        </div>
+      </dl>
+
+      <div className="grid-2">
+        <Section title="Attendance today" icon="attendance" aside={<Link href={`${base}/attendance`}>All registers</Link>}>
+          <div className="panel">
+            <BarList
+              rows={classes.map((schoolClass) => {
+                const sheet = sheets.find((s) => s.classId === schoolClass.id);
+                const rate = sheet ? attendanceRate(totalsFromStatuses(sheet.entries.map((e) => e.status))) : undefined;
+                return {
+                  key: schoolClass.id,
+                  label: <Link href={`${base}/attendance/${schoolClass.id}`}>{schoolClass.name}</Link>,
+                  value: rate ?? 0,
+                  tone: toneForRate(rate),
+                  display: sheet ? formatPercent(rate ?? 0) : <span className="warn">{schoolDay ? 'Not marked' : '-'}</span>,
+                };
+              })}
+            />
+          </div>
+        </Section>
+        <Section title="Fees collected by class" icon="fees" aside={<Link href={`${base}/fees`}>Fee accounts</Link>}>
+          <div className="panel">
+            <BarList
+              rows={feeByClass.map(({ schoolClass, share }) => ({
+                key: schoolClass.id,
+                label: schoolClass.name,
+                value: share,
+                tone: toneForRate(share, 75, 50),
+                display: formatPercent(share),
+              }))}
+            />
+          </div>
+        </Section>
+      </div>
+
+      <div className="grid-2">
+        <Section title="Collections by week" icon="money" aside="This term">
+          <div className="panel">
+            <WeeklyCollections payments={feeRows.flatMap((r) => r.account.payments)} termStart={viewer.currentTerm.startsOn} today={today} />
+          </div>
+        </Section>
+        <Section title="Recent activity" icon="activity" aside={<Link href={`${base}/activity`}>Full log</Link>}>
+          <div className="panel">
+            <ActivityList entries={activity.rows} base={base} today={today} />
+          </div>
+        </Section>
+      </div>
+
+      <Section title="Registers today" icon="schedule">
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -53,87 +163,21 @@ export async function HeadteacherOverview({ viewer }: { viewer: Viewer }) {
               {classes.map((schoolClass) => {
                 const sheet = sheets.find((s) => s.classId === schoolClass.id);
                 const counts = sheet && totalsFromStatuses(sheet.entries.map((e) => e.status));
-                const onRoll = roll.filter((r) => r.schoolClass?.id === schoolClass.id && isEnrolledOn(r.student, today)).length;
                 return (
                   <tr key={schoolClass.id}>
                     <td>
-                      <Link href={`${base}/attendance/${schoolClass.id}`}>{schoolClass.name}</Link>
+                      <Link href={`${base}/classes/${schoolClass.id}`}>{schoolClass.name}</Link>
                     </td>
                     <td>{staffName(staff.find((s) => s.id === schoolClass.classTeacherId))}</td>
-                    <td className="num">{onRoll}</td>
+                    <td className="num">{rollCounts.get(schoolClass.id) ?? 0}</td>
                     <td className="num">{counts?.present ?? ''}</td>
                     <td className="num">{counts?.late ?? ''}</td>
                     <td className="num">{counts?.excused ?? ''}</td>
-                    <td className="num">{counts?.absent ?? ''}</td>
-                    <td>{sheet ? <span className="muted">{formatTime(sheet.markedAt)}</span> : <span className="warn">Not marked</span>}</td>
+                    <td className={counts?.absent ? 'num bad' : 'num'}>{counts?.absent ?? ''}</td>
+                    <td>{sheet ? <span className="muted">{formatTime(sheet.markedAt)}</span> : schoolDay ? <span className="tag tag--warn">Not marked</span> : ''}</td>
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-
-      <Section title="Fees this term" aside={<Link href={`${base}/fees`}>Fee accounts</Link>}>
-        <div className="panel panel--padded">
-          Collected <strong className="mono">{formatMoney(collection.collected)}</strong> of{' '}
-          <span className="mono">{formatMoney(collection.due)}</span> due (term fees and arrears, less scholarships), which is{' '}
-          {formatPercent(collection.due ? (collection.collected / collection.due) * 100 : 0)}.{' '}
-          <span className="mono">{collection.studentsOwing}</span> students still owe{' '}
-          <span className="mono">{formatMoney(collection.outstanding)}</span>.
-        </div>
-      </Section>
-
-      <Section title="Score entry" aside="Class scores for this term">
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Class</th>
-                <th className="num">Subjects</th>
-                <th className="num">Complete</th>
-                <th className="num">Started</th>
-                <th className="num">Not started</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {classes.map((schoolClass) => {
-                const sheetsForClass = progress.filter((p) => p.schoolClass.id === schoolClass.id);
-                const complete = sheetsForClass.filter((p) => p.onRoll > 0 && p.classScoresEntered === p.onRoll).length;
-                const notStarted = sheetsForClass.filter((p) => p.classScoresEntered === 0).length;
-                return (
-                  <tr key={schoolClass.id}>
-                    <td>{schoolClass.name}</td>
-                    <td className="num">{sheetsForClass.length}</td>
-                    <td className="num">{complete}</td>
-                    <td className="num">{sheetsForClass.length - complete - notStarted}</td>
-                    <td className={notStarted ? 'num bad' : 'num'}>{notStarted}</td>
-                    <td>
-                      <Link href={`${base}/scores?class=${schoolClass.id}`}>View sheets</Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-
-      <Section title="Recent admissions and exits" aside={<Link href={`${base}/movements`}>All records</Link>}>
-        <div className="table-wrap">
-          <table className="table">
-            <tbody>
-              {movements.map(({ movement, student }) => (
-                <tr key={movement.id}>
-                  <td className="nowrap">{formatDate(movement.date)}</td>
-                  <td className="nowrap">{movement.kind}</td>
-                  <td className="nowrap">
-                    <Link href={`${base}/students/${admissionNoToSlug(student.admissionNo)}`}>{studentRegisterName(student)}</Link>
-                  </td>
-                  <td className="muted">{movement.details}</td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>

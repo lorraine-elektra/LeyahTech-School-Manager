@@ -13,30 +13,38 @@ async function openSchool(formData: FormData) {
 export default async function FindSchoolPage({ searchParams }: { searchParams: Promise<{ notFound?: string }> }) {
   const { notFound } = await searchParams;
   return (
-    <div className="login">
-      <div className="login__box">
-        <p className="muted" style={{ marginBottom: 4 }}>
-          {PRODUCT_NAME}
-        </p>
-        <h1 style={{ marginBottom: 12 }}>Sign in to your school</h1>
-        <form action={openSchool} className="panel login__form">
-          <label className="field">
-            <span>School code</span>
-            <input name="schoolCode" defaultValue={notFound} placeholder={DEMO_SCHOOL_SLUG} autoFocus />
-          </label>
-          {notFound !== undefined && (
-            <div className="notice notice--error">
-              No school uses the code &quot;{notFound}&quot;. Check the code on your staff or parent letter and try again.
+    <div className="login login--single">
+      <main className="login__main">
+        <div className="login__box">
+          <div className="school-mark" style={{ marginBottom: 24 }}>
+            <div className="school-mark__crest" aria-hidden="true">
+              LT
             </div>
-          )}
-          <button className="button button--primary" type="submit">
-            Continue
-          </button>
-        </form>
-        <p className="muted" style={{ marginTop: 12 }}>
-          Demo school code: <span className="mono">{DEMO_SCHOOL_SLUG}</span>
-        </p>
-      </div>
+            <div className="school-mark__name">{PRODUCT_NAME}</div>
+          </div>
+          <h1 style={{ marginBottom: 6 }}>Sign in to your school</h1>
+          <p className="muted" style={{ marginBottom: 16 }}>
+            Enter the school code from your staff or parent letter.
+          </p>
+          <form action={openSchool} className="panel login__form">
+            <label className="field">
+              <span>School code</span>
+              <input name="schoolCode" defaultValue={notFound} placeholder={DEMO_SCHOOL_SLUG} autoFocus />
+            </label>
+            {notFound !== undefined && (
+              <div className="notice notice--error">
+                No school uses the code &quot;{notFound}&quot;. Check the code on your staff or parent letter and try again.
+              </div>
+            )}
+            <button className="button button--primary" type="submit">
+              Continue
+            </button>
+          </form>
+          <p className="muted" style={{ marginTop: 14 }}>
+            Demo school code: <span className="mono">{DEMO_SCHOOL_SLUG}</span>
+          </p>
+        </div>
+      </main>
     </div>
   );
 }

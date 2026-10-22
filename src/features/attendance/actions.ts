@@ -1,13 +1,16 @@
 'use server';
 
 import { and, eq } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { db } from '@/db/client';
 import { attendanceEntries, attendanceSheets } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { canMarkAttendance } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
 import { isSchoolDay, todayIso } from '@/features/school/calendar';
+import { getClass } from '@/features/school/queries';
 import { classRoll, isEnrolledOn } from '@/features/students/queries';
+import { schoolChanged } from '@/lib/revalidate';
+import { formatDate } from '@/ui/format';
 import { attendanceStatuses } from './summary';
 import type { AttendanceStatus } from './types';
 
@@ -53,6 +56,9 @@ export async function saveAttendance(schoolSlug: string, classId: string, date: 
     if (entries.length) await tx.insert(attendanceEntries).values(entries.map((e) => ({ ...e, sheetId })));
   });
 
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  const absent = entries.filter((e) => e.status === 'absent').length;
+  const schoolClass = await getClass(viewer.school.id, classId);
+  await recordActivity(viewer, 'Attendance', `Marked ${schoolClass?.name ?? 'class'} attendance for ${formatDate(date)}: ${entries.length - absent} in, ${absent} absent`, `/attendance/${classId}?date=${date}`);
+  schoolChanged(viewer);
   return { savedAt: new Date().toISOString() };
 }

@@ -8,16 +8,20 @@ import { sumMoney } from '@/features/fees/accounts';
 import { paymentMethods } from '@/features/fees/types';
 import { todayIso } from '@/features/school/calendar';
 import { studentFullName, studentRegisterName } from '@/features/students/names';
-import { formatDate, formatMoney } from '@/ui/format';
+import { EmptyState } from '@/ui/EmptyState';
 import { FilterBar } from '@/ui/FilterBar';
+import { Icon } from '@/ui/Icon';
 import { PageHeader } from '@/ui/PageHeader';
+import { PAGE_SIZE, pageFrom, Pagination } from '@/ui/Pagination';
+import { Tag } from '@/ui/Tag';
+import { formatDate, formatMoney } from '@/ui/format';
 
 export default async function ReceiptsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ school: string }>;
-  searchParams: Promise<{ from?: string; to?: string; method?: string; q?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; method?: string; q?: string; page?: string }>;
 }) {
   const { school } = await params;
   const filters = await searchParams;
@@ -44,13 +48,23 @@ export default async function ReceiptsPage({
         payment.reference?.toLowerCase().includes(query)),
   );
   const valid = rows.filter((r) => !r.payment.voidedOn);
+  const page = pageFrom(filters.page);
+  const shown = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const byMethod = paymentMethods
     .map((method) => ({ method, rows: valid.filter((r) => r.payment.method === method) }))
     .filter((group) => group.rows.length);
 
   return (
     <>
-      <PageHeader title="Receipts" meta={`${formatDate(from)} to ${formatDate(to)}`} />
+      <PageHeader
+        title="Receipts"
+        meta={`${formatDate(from)} to ${formatDate(to)}`}
+        actions={
+          <a className="button" href={`/${school}/exports/receipts?from=${from}&to=${to}`}>
+            <Icon name="download" /> Export CSV
+          </a>
+        }
+      />
       <FilterBar count={`${valid.length} receipts · ${formatMoney(sumMoney(valid, (r) => r.payment.amount))}`}>
         <label className="field">
           <span>From</span>
@@ -90,7 +104,7 @@ export default async function ReceiptsPage({
 
       <div className="table-wrap">
         {rows.length === 0 ? (
-          <p className="empty">No payments recorded between these dates.</p>
+          <EmptyState icon="receipt">No payments recorded between these dates.</EmptyState>
         ) : (
           <table className="table">
             <thead>
@@ -105,7 +119,7 @@ export default async function ReceiptsPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ payment, student }) => (
+              {shown.map(({ payment, student }) => (
                 <tr key={payment.id} className={payment.voidedOn ? 'row-muted' : undefined}>
                   <td className="mono nowrap">
                     <Link href={`/${school}/fees/receipts/${payment.id}`}>{payment.receiptNo}</Link>
@@ -114,13 +128,14 @@ export default async function ReceiptsPage({
                   <td className="nowrap">{studentRegisterName(student)}</td>
                   <td>{payment.paidBy}</td>
                   <td className="nowrap">{payment.method}</td>
-                  <td className="mono">{payment.voidedOn ? 'Void' : payment.reference}</td>
+                  <td className="mono">{payment.voidedOn ? <Tag tone="bad">Void</Tag> : payment.reference}</td>
                   <td className="num">{formatMoney(payment.amount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        <Pagination page={page} total={rows.length} basePath={`/${school}/fees/receipts`} params={{ from: filters.from, to: filters.to, method: filters.method, q: filters.q }} />
       </div>
     </>
   );

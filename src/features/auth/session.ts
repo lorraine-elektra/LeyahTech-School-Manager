@@ -1,8 +1,8 @@
 import 'server-only';
-import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, lt, ne } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
+import { createHash, randomBytes } from 'node:crypto';
 import { cache } from 'react';
 import { db } from '@/db/client';
 import { classes, guardians, schools, sessions, staff, teachingAssignments, terms, users } from '@/db/schema';
@@ -26,6 +26,7 @@ export interface Viewer {
   guardian: Guardian | null;
   ownClassId: string | null;
   assignments: TeachingAssignment[];
+  mustChangePassword: boolean;
 }
 
 function hashToken(token: string): string {
@@ -35,6 +36,7 @@ function hashToken(token: string): string {
 export async function startSession(userId: string) {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
+  await db.delete(sessions).where(and(eq(sessions.userId, userId), lt(sessions.expiresAt, new Date())));
   await db.insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt });
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -50,6 +52,16 @@ export async function endSession() {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
   cookieStore.delete(SESSION_COOKIE);
+}
+
+export async function endAllSessions(userId: string) {
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+// Signs the user out everywhere except the browser making this request.
+export async function endOtherSessions(userId: string) {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  await db.delete(sessions).where(and(eq(sessions.userId, userId), token ? ne(sessions.tokenHash, hashToken(token)) : undefined));
 }
 
 export async function findSchoolBySlug(slug: string): Promise<School | undefined> {
@@ -111,6 +123,7 @@ const loadViewer = cache(async (schoolSlug: string): Promise<Viewer | undefined>
     guardian: guardian ?? null,
     ownClassId,
     assignments,
+    mustChangePassword: user.mustChangePassword,
   };
 });
 

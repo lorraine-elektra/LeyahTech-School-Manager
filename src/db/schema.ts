@@ -86,15 +86,48 @@ export const users = pgTable(
     staffId: uuid('staff_id').references(() => staff.id),
     guardianId: uuid('guardian_id').references(() => guardians.id),
     disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    mustChangePassword: boolean('must_change_password').notNull().default(false),
   },
-  (t) => [unique().on(t.schoolId, t.username)],
+  (t) => [unique().on(t.schoolId, t.username), index().on(t.guardianId), index().on(t.staffId)],
 );
 
-export const sessions = pgTable('sessions', {
-  tokenHash: text('token_hash').primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-});
+export const sessions = pgTable(
+  'sessions',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index().on(t.userId), index().on(t.expiresAt)],
+);
+
+// Failed sign-ins are counted here so lockouts hold across every server instance.
+export const loginAttempts = pgTable(
+  'login_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    schoolId: uuid('school_id').notNull().references(() => schools.id, { onDelete: 'cascade' }),
+    username: text('username').notNull(),
+    ipAddress: text('ip_address'),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index().on(t.schoolId, t.username, t.attemptedAt), index().on(t.attemptedAt)],
+);
+
+export const activityLog = pgTable(
+  'activity_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    schoolId: uuid('school_id').notNull().references(() => schools.id, { onDelete: 'cascade' }),
+    at: timestamp('at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    actorName: text('actor_name').notNull(),
+    area: text('area').$type<'Students' | 'Attendance' | 'Scores' | 'Reports' | 'Fees' | 'Promotion' | 'Settings' | 'Staff'>().notNull(),
+    action: text('action').notNull(),
+    link: text('link'),
+  },
+  (t) => [index().on(t.schoolId, t.at), index().on(t.schoolId, t.area, t.at)],
+);
 
 export const subjects = pgTable(
   'subjects',
@@ -159,7 +192,7 @@ export const students = pgTable(
     exitedOn: isoDate('exited_on'),
     exitReason: text('exit_reason'),
   },
-  (t) => [unique().on(t.schoolId, t.admissionNo)],
+  (t) => [unique().on(t.schoolId, t.admissionNo), index().on(t.schoolId, t.status), index().on(t.guardianId)],
 );
 
 export const enrolments = pgTable(
@@ -173,7 +206,7 @@ export const enrolments = pgTable(
       'Promoted' | 'Promoted on trial' | 'Repeated' | 'Completed' | 'Withdrawn' | 'Transferred out'
     >(),
   },
-  (t) => [primaryKey({ columns: [t.studentId, t.academicYear] }), index().on(t.classId)],
+  (t) => [primaryKey({ columns: [t.studentId, t.academicYear] }), index().on(t.classId), index().on(t.schoolId, t.academicYear)],
 );
 
 export const studentMovements = pgTable(
@@ -211,7 +244,7 @@ export const attendanceEntries = pgTable(
     status: text('status').$type<'present' | 'late' | 'excused' | 'absent'>().notNull(),
     note: text('note'),
   },
-  (t) => [primaryKey({ columns: [t.sheetId, t.studentId] })],
+  (t) => [primaryKey({ columns: [t.sheetId, t.studentId] }), index().on(t.studentId)],
 );
 
 // Closed terms keep per-student totals; daily entries are needed only while a term is open.
@@ -242,7 +275,7 @@ export const subjectScores = pgTable(
     updatedBy: uuid('updated_by').references(() => staff.id),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
-  (t) => [primaryKey({ columns: [t.termId, t.studentId, t.subjectId] })],
+  (t) => [primaryKey({ columns: [t.termId, t.studentId, t.subjectId] }), index().on(t.schoolId, t.termId, t.subjectId)],
 );
 
 export const reportRemarks = pgTable(
@@ -259,29 +292,37 @@ export const reportRemarks = pgTable(
   (t) => [primaryKey({ columns: [t.termId, t.studentId] })],
 );
 
-export const feeItems = pgTable('fee_items', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  schoolId: uuid('school_id').notNull().references(() => schools.id),
-  termId: uuid('term_id').notNull().references(() => terms.id),
-  level: text('level').$type<'JHS' | 'SHS'>().notNull(),
-  programme: text('programme'),
-  name: text('name').notNull(),
-  amount: money('amount').notNull(),
-  isTuition: boolean('is_tuition').notNull(),
-});
+export const feeItems = pgTable(
+  'fee_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    schoolId: uuid('school_id').notNull().references(() => schools.id),
+    termId: uuid('term_id').notNull().references(() => terms.id),
+    level: text('level').$type<'JHS' | 'SHS'>().notNull(),
+    programme: text('programme'),
+    name: text('name').notNull(),
+    amount: money('amount').notNull(),
+    isTuition: boolean('is_tuition').notNull(),
+  },
+  (t) => [index().on(t.schoolId, t.termId)],
+);
 
-export const scholarships = pgTable('scholarships', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  schoolId: uuid('school_id').notNull().references(() => schools.id),
-  studentId: uuid('student_id').notNull().references(() => students.id),
-  name: text('name').notNull(),
-  basis: text('basis').$type<'percentOfTuition' | 'fixedPerTerm'>().notNull(),
-  value: money('value').notNull(),
-  fromTermId: uuid('from_term_id').notNull().references(() => terms.id),
-  toTermId: uuid('to_term_id').references(() => terms.id),
-  approvedBy: uuid('approved_by').references(() => staff.id),
-  notes: text('notes'),
-});
+export const scholarships = pgTable(
+  'scholarships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    schoolId: uuid('school_id').notNull().references(() => schools.id),
+    studentId: uuid('student_id').notNull().references(() => students.id),
+    name: text('name').notNull(),
+    basis: text('basis').$type<'percentOfTuition' | 'fixedPerTerm'>().notNull(),
+    value: money('value').notNull(),
+    fromTermId: uuid('from_term_id').notNull().references(() => terms.id),
+    toTermId: uuid('to_term_id').references(() => terms.id),
+    approvedBy: uuid('approved_by').references(() => staff.id),
+    notes: text('notes'),
+  },
+  (t) => [index().on(t.schoolId), index().on(t.studentId)],
+);
 
 export const feePayments = pgTable(
   'fee_payments',
@@ -301,7 +342,7 @@ export const feePayments = pgTable(
     voidedBy: uuid('voided_by').references(() => staff.id),
     voidReason: text('void_reason'),
   },
-  (t) => [unique().on(t.schoolId, t.receiptNo), index().on(t.studentId), index().on(t.schoolId, t.paidOn)],
+  (t) => [unique().on(t.schoolId, t.receiptNo), index().on(t.studentId), index().on(t.schoolId, t.paidOn), index().on(t.schoolId, t.termId)],
 );
 
 // Balances owed before a school's records moved into the system.

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Icon } from '@/ui/Icon';
 import type { NavGroup } from './navigation';
 
 export function SideNav({ basePath, groups }: { basePath: string; groups: NavGroup[] }) {
@@ -21,6 +22,7 @@ export function SideNav({ basePath, groups }: { basePath: string; groups: NavGro
             const href = basePath + link.href;
             return (
               <Link key={href} href={href} className={href === activeHref ? 'active' : undefined}>
+                <Icon name={link.icon} />
                 {link.label}
               </Link>
             );

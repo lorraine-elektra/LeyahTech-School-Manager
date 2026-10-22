@@ -1,13 +1,15 @@
 'use server';
 
 import { and, eq, like, sql } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { db } from '@/db/client';
 import { classes, enrolments, guardians, studentMovements, students } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { canAdmitStudents, canRecordExits } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
 import { todayIso } from '@/features/school/calendar';
+import { schoolChanged } from '@/lib/revalidate';
+import { formValues, type FormState } from '@/ui/formState';
 import { normalisePhone } from '@/ui/format';
 import { admissionNoToSlug, slugToAdmissionNo } from './names';
 
@@ -104,7 +106,8 @@ export async function admitStudent(schoolSlug: string, _previous: StudentFormSta
     return number;
   });
 
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  await recordActivity(viewer, 'Students', `Admitted ${values.firstName} ${values.surname} (${admissionNo}) into ${schoolClass.name}`, `/students/${admissionNoToSlug(admissionNo)}`);
+  schoolChanged(viewer);
   redirect(`/${schoolSlug}/students/${admissionNoToSlug(admissionNo)}?admitted=1`);
 }
 
@@ -134,6 +137,40 @@ export async function recordExit(schoolSlug: string, studentId: string, _previou
     await tx.insert(studentMovements).values({ schoolId: viewer.school.id, studentId: student.id, kind, date: values.date, details, recordedBy: viewer.staff?.id ?? null });
   });
 
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  await recordActivity(viewer, 'Students', `Recorded ${kind.toLowerCase()} of ${student.firstName} ${student.surname} (${student.admissionNo})`, `/students/${admissionNoToSlug(student.admissionNo)}`);
+  schoolChanged(viewer);
   redirect(`/${schoolSlug}/students/${admissionNoToSlug(student.admissionNo)}`);
+}
+
+export async function updateStudentDetails(schoolSlug: string, studentId: string, _previous: FormState, formData: FormData): Promise<FormState> {
+  const viewer = await requireViewer(schoolSlug);
+  if (!canAdmitStudents(viewer)) return { error: 'Only the headteacher or bursar can change student details.' };
+  const v = formValues(formData);
+  if (!v.surname || !v.firstName) return { error: 'Enter the student’s surname and first name.' };
+  if (v.gender !== 'M' && v.gender !== 'F') return { error: 'Choose the student’s sex.' };
+  if (!isoDate.test(v.dateOfBirth) || v.dateOfBirth > todayIso()) return { error: 'Enter a valid date of birth.' };
+  const [student] = await db.select().from(students).where(and(eq(students.schoolId, viewer.school.id), eq(students.id, studentId)));
+  if (!student) return { error: 'This student record no longer exists.' };
+
+  const phone = v.guardianPhone ? normalisePhone(v.guardianPhone) : null;
+  if (v.guardianPhone && !phone) return { error: 'The guardian phone number should be 10 digits, like 024 412 6630.' };
+  const altPhone = v.guardianAltPhone ? normalisePhone(v.guardianAltPhone) : null;
+  if (v.guardianAltPhone && !altPhone) return { error: 'The other phone number should be 10 digits, like 020 816 2274.' };
+  if (student.guardianId && (!v.guardianName || !v.guardianTitle || !v.relationship)) return { error: 'Enter the guardian’s title, name and relationship.' };
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(students)
+      .set({ surname: v.surname, firstName: v.firstName, otherNames: v.otherNames || null, gender: v.gender as 'M' | 'F', dateOfBirth: v.dateOfBirth, medicalNotes: v.medicalNotes || null })
+      .where(eq(students.id, student.id));
+    if (student.guardianId) {
+      await tx
+        .update(guardians)
+        .set({ title: v.guardianTitle, name: v.guardianName, relationship: v.relationship, phone, altPhone, occupation: v.occupation || null, residence: v.residence || null })
+        .where(and(eq(guardians.schoolId, viewer.school.id), eq(guardians.id, student.guardianId)));
+    }
+    await recordActivity(viewer, 'Students', `Updated details for ${v.firstName} ${v.surname} (${student.admissionNo})`, `/students/${admissionNoToSlug(student.admissionNo)}`, tx);
+  });
+  schoolChanged(viewer);
+  return { saved: 'Details saved.' };
 }

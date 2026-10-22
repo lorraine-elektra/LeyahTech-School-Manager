@@ -1,7 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
+import { randomUUID } from 'node:crypto';
 import { hashPassword } from '@/features/auth/password';
+import { staffName } from '@/features/staff/names';
+import { formatDate, formatMoney } from '@/ui/format';
 import type { Database } from '../client';
 import * as schema from '../schema';
 import { SEED_SCHOOL_ID, type SeedDataset } from './dataset';
@@ -153,5 +155,43 @@ export async function loadSeed(db: Database, dataset: SeedDataset) {
     lastReceipts.set(Number(year), Math.max(lastReceipts.get(Number(year)) ?? 0, Number(sequence)));
   }
   await insertRows(db, schema.receiptCounters, [...lastReceipts].map(([year, lastNumber]) => ({ schoolId, year, lastNumber })));
+  await insertRows(db, schema.activityLog, seedActivity(dataset, id).map((entry) => ({ ...entry, schoolId })));
   return school;
+}
+
+// Recent payments and registers, written as the activity log would have recorded them.
+function seedActivity(dataset: SeedDataset, id: (localId: string) => string): Omit<typeof schema.activityLog.$inferInsert, 'schoolId'>[] {
+  const staffById = new Map(dataset.staff.map((s) => [s.id, s]));
+  const studentById = new Map(dataset.students.map((s) => [s.id, s]));
+  const classById = new Map(dataset.classes.map((c) => [c.id, c]));
+  const recentPayments = [...dataset.payments].sort((a, b) => b.paidOn.localeCompare(a.paidOn) || b.receiptNo.localeCompare(a.receiptNo)).slice(0, 40);
+  const lastDays = [...new Set(dataset.attendanceSheets.map((s) => s.date))].sort().slice(-3);
+  const registers = dataset.attendanceSheets.filter((s) => lastDays.includes(s.date));
+  const absences = new Map<string, number>();
+  for (const entry of dataset.attendanceEntries) if (entry.status === 'absent') absences.set(entry.sheetId, (absences.get(entry.sheetId) ?? 0) + 1);
+  const rollSize = new Map<string, number>();
+  for (const entry of dataset.attendanceEntries) rollSize.set(entry.sheetId, (rollSize.get(entry.sheetId) ?? 0) + 1);
+
+  return [
+    ...recentPayments.map((p, index) => {
+      const student = studentById.get(p.studentId)!;
+      return {
+        at: `${p.paidOn}T${String(9 + (index % 7)).padStart(2, '0')}:${String((index * 13) % 60).padStart(2, '0')}:00Z`,
+        actorName: staffName(staffById.get(p.receivedBy ?? '')) || 'School office',
+        area: 'Fees' as const,
+        action: `Recorded ${p.receiptNo}, ${formatMoney(p.amount)} for ${student.firstName} ${student.surname} (${student.admissionNo})`,
+        link: `/fees/receipts/${id(p.id)}`,
+      };
+    }),
+    ...registers.map((sheet) => {
+      const absent = absences.get(sheet.id) ?? 0;
+      return {
+        at: sheet.markedAt,
+        actorName: staffName(staffById.get(sheet.markedBy ?? '')) || 'Class teacher',
+        area: 'Attendance' as const,
+        action: `Marked ${classById.get(sheet.classId)?.name} attendance for ${formatDate(sheet.date)}: ${(rollSize.get(sheet.id) ?? 0) - absent} in, ${absent} absent`,
+        link: `/attendance/${id(sheet.classId)}?date=${sheet.date}`,
+      };
+    }),
+  ];
 }

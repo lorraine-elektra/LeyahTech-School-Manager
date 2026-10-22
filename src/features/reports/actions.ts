@@ -4,7 +4,9 @@ import { sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { db } from '@/db/client';
 import { reportRemarks } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { requireViewer } from '@/features/auth/session';
+import { termLabel } from '@/features/school/calendar';
 import { canViewClassReports } from './access';
 import { loadClassReports, resolveTerm } from './data';
 
@@ -51,5 +53,6 @@ export async function saveRemarks(schoolSlug: string, classId: string, termId: s
         },
       });
   }
+  await recordActivity(viewer, 'Reports', `Saved report remarks for ${reports.schoolClass.name}, ${termLabel(term)}`, `/reports/${classId}/remarks?term=${term.id}`);
   redirect(`/${schoolSlug}/reports/${classId}/remarks?term=${term.id}&saved=1`);
 }

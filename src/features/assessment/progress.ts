@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { classes, enrolments, students, subjectScores, subjects, teachingAssignments } from '@/db/schema';
 import type { Viewer } from '@/features/auth/session';
@@ -33,28 +33,36 @@ export async function scoreSheetProgress(viewer: Viewer, classIds?: string[], te
   const relevantClassIds = [...new Set(assignmentRows.map((r) => r.schoolClass.id))];
   if (!relevantClassIds.length) return [];
 
-  const rollRows = await db
-    .select({ classId: enrolments.classId, studentId: enrolments.studentId })
+  // Counted in the database: a large school has tens of thousands of score rows per term.
+  const countRows = await db
+    .select({
+      classId: enrolments.classId,
+      subjectId: teachingAssignments.subjectId,
+      onRoll: count(),
+      classScoresEntered: count(subjectScores.classScore),
+      examScoresEntered: count(subjectScores.examScore),
+    })
     .from(enrolments)
-    .innerJoin(students, eq(students.id, enrolments.studentId))
-    .where(and(inArray(enrolments.classId, relevantClassIds), eq(students.status, 'Active')));
-  const scoreRows = await db
-    .select({ studentId: subjectScores.studentId, subjectId: subjectScores.subjectId, classScore: subjectScores.classScore, examScore: subjectScores.examScore })
-    .from(subjectScores)
-    .where(and(eq(subjectScores.schoolId, schoolId), eq(subjectScores.termId, termId)));
+    .innerJoin(students, and(eq(students.id, enrolments.studentId), eq(students.status, 'Active')))
+    .innerJoin(teachingAssignments, eq(teachingAssignments.classId, enrolments.classId))
+    .leftJoin(
+      subjectScores,
+      and(eq(subjectScores.studentId, enrolments.studentId), eq(subjectScores.subjectId, teachingAssignments.subjectId), eq(subjectScores.termId, termId)),
+    )
+    .where(inArray(enrolments.classId, relevantClassIds))
+    .groupBy(enrolments.classId, teachingAssignments.subjectId);
+  const counts = new Map(countRows.map((r) => [`${r.classId}|${r.subjectId}`, r]));
 
-  const scoreIndex = new Map(scoreRows.map((s) => [`${s.studentId}|${s.subjectId}`, s]));
   return assignmentRows
     .map(({ assignment, schoolClass, subject }) => {
-      const roll = rollRows.filter((r) => r.classId === schoolClass.id);
-      const sheetScores = roll.map((r) => scoreIndex.get(`${r.studentId}|${subject.id}`)).filter((s) => s !== undefined);
+      const sheet = counts.get(`${schoolClass.id}|${subject.id}`);
       return {
         schoolClass,
         subject,
         teacherId: assignment.teacherId,
-        onRoll: roll.length,
-        classScoresEntered: sheetScores.filter((s) => s.classScore !== null).length,
-        examScoresEntered: sheetScores.filter((s) => s.examScore !== null).length,
+        onRoll: sheet?.onRoll ?? 0,
+        classScoresEntered: sheet?.classScoresEntered ?? 0,
+        examScoresEntered: sheet?.examScoresEntered ?? 0,
       };
     })
     .sort((a, b) => a.schoolClass.yearGroup - b.schoolClass.yearGroup || a.schoolClass.name.localeCompare(b.schoolClass.name) || a.subject.sortOrder - b.subject.sortOrder);

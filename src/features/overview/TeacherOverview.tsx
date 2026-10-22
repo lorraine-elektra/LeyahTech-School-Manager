@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ScoreSheetTable } from '@/features/assessment/ScoreSheetTable';
 import { scoreSheetProgress } from '@/features/assessment/progress';
 import { classSheet, termAttendanceTotals } from '@/features/attendance/queries';
 import { attendanceRate, totalsFromStatuses } from '@/features/attendance/summary';
@@ -7,10 +8,12 @@ import { isSchoolDay, termLabel, todayIso } from '@/features/school/calendar';
 import { getClass } from '@/features/school/queries';
 import { admissionNoToSlug, studentRegisterName } from '@/features/students/names';
 import { classRoll } from '@/features/students/queries';
-import { formatDateWithDay, formatPercent, formatTime } from '@/ui/format';
+import { EmptyState } from '@/ui/EmptyState';
+import { Icon } from '@/ui/Icon';
 import { PageHeader } from '@/ui/PageHeader';
 import { Section } from '@/ui/Section';
-import { ScoreSheetTable } from '@/features/assessment/ScoreSheetTable';
+import { formatDateWithDay, formatPercent, formatTime } from '@/ui/format';
+import { greeting } from './greeting';
 
 const LOW_ATTENDANCE = 85;
 
@@ -21,9 +24,9 @@ export async function TeacherOverview({ viewer }: { viewer: Viewer }) {
 
   return (
     <>
-      <PageHeader title="Overview" meta={`${termLabel(viewer.currentTerm)} · ${formatDateWithDay(today)}`} />
+      <PageHeader title={`Good ${greeting()}, ${viewer.staff?.title} ${viewer.staff?.surname}`} meta={`${termLabel(viewer.currentTerm)} · ${formatDateWithDay(today)}`} />
       {viewer.ownClassId && <OwnClassSummary viewer={viewer} classId={viewer.ownClassId} today={today} />}
-      <Section title="My score sheets" aside="Class scores out of 30, exams out of 100">
+      <Section title="My score sheets" icon="scores" aside="Class scores out of 30, exams out of 100">
         <ScoreSheetTable base={base} sheets={sheets} />
       </Section>
     </>
@@ -47,27 +50,31 @@ async function OwnClassSummary({ viewer, classId, today }: { viewer: Viewer; cla
 
   return (
     <>
-      <Section title={`${schoolClass?.name} attendance today`}>
+      <Section title={`${schoolClass?.name} attendance today`} icon="attendance">
         <div className="panel panel--padded" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
           {!isSchoolDay(today) ? (
             <span className="muted">Not a school day.</span>
           ) : sheet && counts ? (
-            <span>
-              Marked at {formatTime(sheet.markedAt)}. {counts.present} present, {counts.late} late, {counts.excused} excused, {counts.absent} absent.
+            <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="muted">Marked at {formatTime(sheet.markedAt)}</span>
+              <span className="tag tag--good">{counts.present} present</span>
+              <span className="tag tag--warn">{counts.late} late</span>
+              <span className="tag tag--info">{counts.excused} excused</span>
+              <span className="tag tag--bad">{counts.absent} absent</span>
             </span>
           ) : (
-            <span className="warn">Attendance has not been marked today.</span>
+            <span className="tag tag--warn">Attendance has not been marked today</span>
           )}
           <Link className={sheet ? 'button' : 'button button--primary'} href={`${base}/attendance/${classId}`}>
-            {sheet ? 'Edit attendance' : 'Mark attendance'}
+            <Icon name="attendance" /> {sheet ? 'Edit attendance' : 'Mark attendance'}
           </Link>
         </div>
       </Section>
 
-      <Section title={`Attendance below ${LOW_ATTENDANCE}% this term`} aside={<Link href={`${base}/attendance/${classId}/register`}>Term register</Link>}>
+      <Section title={`Attendance below ${LOW_ATTENDANCE}% this term`} icon="alert" aside={<Link href={`${base}/attendance/${classId}/register`}>Term register</Link>}>
         <div className="table-wrap">
           {lowAttendance.length === 0 ? (
-            <p className="empty">No student in this class is below {LOW_ATTENDANCE}% attendance this term.</p>
+            <EmptyState icon="done">No student in this class is below {LOW_ATTENDANCE}% attendance this term.</EmptyState>
           ) : (
             <table className="table">
               <thead>

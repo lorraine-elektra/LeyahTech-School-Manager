@@ -4,9 +4,13 @@ import { summariseCollection } from '@/features/fees/accounts';
 import { recentPayments, schoolFeeAccounts } from '@/features/fees/queries';
 import { termLabel, todayIso } from '@/features/school/calendar';
 import { admissionNoToSlug, studentRegisterName } from '@/features/students/names';
-import { formatDateWithDay, formatMoney } from '@/ui/format';
+import { Meter, toneForRate } from '@/ui/Charts';
+import { EmptyState } from '@/ui/EmptyState';
+import { Icon } from '@/ui/Icon';
 import { PageHeader } from '@/ui/PageHeader';
 import { Section } from '@/ui/Section';
+import { formatDateWithDay, formatMoney, formatPercent } from '@/ui/format';
+import { WeeklyCollections } from './WeeklyCollections';
 
 export async function BursarOverview({ viewer }: { viewer: Viewer }) {
   const base = `/${viewer.school.slug}`;
@@ -15,6 +19,7 @@ export async function BursarOverview({ viewer }: { viewer: Viewer }) {
   const collection = summariseCollection(feeRows.map((r) => r.account));
   const largestBalances = [...feeRows].filter((r) => r.account.balance > 0).sort((a, b) => b.account.balance - a.account.balance).slice(0, 15);
   const validToday = paymentsToday.filter((p) => !p.payment.voidedOn);
+  const collectedShare = collection.due ? (collection.collected / collection.due) * 100 : 0;
 
   return (
     <>
@@ -23,7 +28,7 @@ export async function BursarOverview({ viewer }: { viewer: Viewer }) {
         meta={`${termLabel(viewer.currentTerm)} · ${formatDateWithDay(today)}`}
         actions={
           <Link className="button button--primary" href={`${base}/fees/payments/new`}>
-            Record payment
+            <Icon name="payment" /> Record payment
           </Link>
         }
       />
@@ -40,17 +45,28 @@ export async function BursarOverview({ viewer }: { viewer: Viewer }) {
         <div>
           <dt>Collected this term</dt>
           <dd>{formatMoney(collection.collected)}</dd>
+          <div style={{ marginTop: 8 }}>
+            <Meter value={collectedShare} tone={toneForRate(collectedShare, 75, 50)} thin />
+          </div>
+          <div className="key-figures__note">{formatPercent(collectedShare)} of what is due</div>
         </div>
         <div>
           <dt>Outstanding</dt>
-          <dd>{formatMoney(collection.outstanding)}</dd>
+          <dd className="bad">{formatMoney(collection.outstanding)}</dd>
+          <div className="key-figures__note">{collection.studentsOwing} students owe</div>
         </div>
       </dl>
 
-      <Section title="Payments today" aside={`${validToday.length} receipts · ${formatMoney(validToday.reduce((s, p) => s + p.payment.amount, 0))}`}>
+      <Section title="Collections by week" icon="money" aside="This term">
+        <div className="panel">
+          <WeeklyCollections payments={feeRows.flatMap((r) => r.account.payments)} termStart={viewer.currentTerm.startsOn} today={today} weeks={12} />
+        </div>
+      </Section>
+
+      <Section title="Payments today" icon="receipt" aside={`${validToday.length} receipts · ${formatMoney(validToday.reduce((s, p) => s + p.payment.amount, 0))}`}>
         <div className="table-wrap">
           {paymentsToday.length === 0 ? (
-            <p className="empty">No payments recorded today.</p>
+            <EmptyState icon="receipt">No payments recorded today.</EmptyState>
           ) : (
             <table className="table">
               <thead>
@@ -81,7 +97,7 @@ export async function BursarOverview({ viewer }: { viewer: Viewer }) {
         </div>
       </Section>
 
-      <Section title="Largest balances" aside={<Link href={`${base}/fees?standing=owing`}>All students owing</Link>}>
+      <Section title="Largest balances" icon="alert" aside={<Link href={`${base}/fees?standing=owing`}>All students owing</Link>}>
         <div className="table-wrap">
           <table className="table">
             <thead>

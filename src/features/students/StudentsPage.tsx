@@ -2,21 +2,26 @@ import Link from 'next/link';
 import { canAdmitStudents, canViewFees } from '@/features/auth/permissions';
 import type { Viewer } from '@/features/auth/session';
 import { schoolFeeAccounts } from '@/features/fees/queries';
-import { getClasses } from '@/features/school/queries';
 import { todayIso } from '@/features/school/calendar';
-import { ageOn, formatBalance } from '@/ui/format';
+import { getClasses } from '@/features/school/queries';
+import { Avatar } from '@/ui/Avatar';
+import { EmptyState } from '@/ui/EmptyState';
 import { FilterBar } from '@/ui/FilterBar';
+import { Icon } from '@/ui/Icon';
 import { PageHeader } from '@/ui/PageHeader';
+import { PAGE_SIZE, pageFrom, Pagination } from '@/ui/Pagination';
+import { ageOn, formatBalance } from '@/ui/format';
+import { StudentStatusTag } from './StudentStatusTag';
 import { visibleStudentIds } from './access';
 import { admissionNoToSlug, studentFullName, studentRegisterName } from './names';
-import { listStudents } from './queries';
-import { StudentStatusTag } from './StudentStatusTag';
+import { searchStudents } from './queries';
 import type { StudentStatus } from './types';
 
 interface StudentFilters {
   q?: string;
   class?: string;
   status?: string;
+  page?: string;
 }
 
 const statuses: StudentStatus[] = ['Active', 'Withdrawn', 'Transferred out', 'Completed'];
@@ -26,39 +31,45 @@ export async function StudentsPage({ viewer, filters }: { viewer: Viewer; filter
   const today = todayIso();
   const scope = await visibleStudentIds(viewer);
   const showFees = canViewFees(viewer);
-  const [rows, classes, feeRows] = await Promise.all([
-    listStudents(viewer.school.id, viewer.currentTerm.academicYear, scope === 'all' ? undefined : scope),
-    getClasses(viewer.school.id, viewer.currentTerm.academicYear),
-    showFees ? schoolFeeAccounts(viewer) : Promise.resolve([]),
-  ]);
-  const balanceByStudent = new Map(feeRows.map((r) => [r.student.id, r.account.balance]));
-  const status = filters.status ?? 'Active';
-  const query = filters.q?.trim().toLowerCase();
+  const status = (statuses as string[]).includes(filters.status ?? '') || filters.status === 'all' ? (filters.status as StudentStatus | 'all') : 'Active';
+  const page = pageFrom(filters.page);
 
-  const filtered = rows.filter(
-    ({ student, schoolClass, guardian }) =>
-      (status === 'all' || student.status === status) &&
-      (!filters.class || schoolClass?.id === filters.class) &&
-      (!query ||
-        studentFullName(student).toLowerCase().includes(query) ||
-        student.admissionNo.toLowerCase().includes(query) ||
-        guardian?.name.toLowerCase().includes(query) ||
-        guardian?.phone?.replace(/\s/g, '').includes(query.replace(/\s/g, ''))),
-  );
+  const [{ rows, total }, classes] = await Promise.all([
+    searchStudents(viewer.school.id, viewer.currentTerm.academicYear, {
+      q: filters.q,
+      classId: filters.class || undefined,
+      status,
+      ids: scope === 'all' ? undefined : scope,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
+    getClasses(viewer.school.id, viewer.currentTerm.academicYear),
+  ]);
+  const feeRows = showFees && rows.length ? await schoolFeeAccounts(viewer, viewer.currentTerm.id, rows.map((r) => r.student.id)) : [];
+  const balanceByStudent = new Map(feeRows.map((r) => [r.student.id, r.account.balance]));
+  const exportQuery = new URLSearchParams(Object.entries({ q: filters.q, class: filters.class, status }).filter((e): e is [string, string] => !!e[1]));
 
   return (
     <>
       <PageHeader
         title={viewer.role === 'subjectTeacher' ? 'My students' : 'Students'}
+        meta={`${total} ${status === 'all' ? '' : status.toLowerCase() + ' '}students${filters.q ? ` matching "${filters.q}"` : ''}`}
         actions={
-          canAdmitStudents(viewer) && (
-            <Link className="button button--primary" href={`${base}/students/new`}>
-              Admit student
-            </Link>
-          )
+          <>
+            {viewer.role !== 'subjectTeacher' && (
+              <a className="button" href={`${base}/exports/students?${exportQuery}`}>
+                <Icon name="download" /> Export CSV
+              </a>
+            )}
+            {canAdmitStudents(viewer) && (
+              <Link className="button button--primary" href={`${base}/students/new`}>
+                <Icon name="admit" /> Admit student
+              </Link>
+            )}
+          </>
         }
       />
-      <FilterBar count={`${filtered.length} students`}>
+      <FilterBar>
         <label className="field">
           <span>Search</span>
           <input name="q" defaultValue={filters.q} placeholder="Name, admission no., guardian or phone" style={{ width: 280 }} />
@@ -88,46 +99,52 @@ export async function StudentsPage({ viewer, filters }: { viewer: Viewer; filter
       </FilterBar>
 
       <div className="table-wrap">
-        {filtered.length === 0 ? (
-          <p className="empty">No students match these filters.</p>
+        {rows.length === 0 ? (
+          <EmptyState icon="search">No students match these filters. Clear the search or choose another class.</EmptyState>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Admission no.</th>
-                <th>Name</th>
-                <th>Class</th>
-                <th>Sex</th>
-                <th className="num">Age</th>
-                <th>Guardian</th>
-                <th>Guardian phone</th>
-                <th>Status</th>
-                {showFees && <th className="num">Balance</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(({ student, schoolClass, guardian }) => {
-                const balance = balanceByStudent.get(student.id) ?? 0;
-                return (
-                  <tr key={student.id}>
-                    <td className="mono">{student.admissionNo}</td>
-                    <td>
-                      <Link href={`${base}/students/${admissionNoToSlug(student.admissionNo)}`}>{studentRegisterName(student)}</Link>
-                    </td>
-                    <td className="nowrap">{schoolClass?.name}</td>
-                    <td>{student.gender}</td>
-                    <td className="num">{ageOn(student.dateOfBirth, today)}</td>
-                    <td>{guardian ? `${guardian.title} ${guardian.name}` : ''}</td>
-                    <td className="mono nowrap">{guardian?.phone ?? <span className="warn" style={{ fontFamily: 'var(--font-sans)' }}>No phone</span>}</td>
-                    <td>
-                      <StudentStatusTag status={student.status} />
-                    </td>
-                    {showFees && <td className={balance > 0 ? 'num bad' : 'num'}>{formatBalance(balance)}</td>}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Admission no.</th>
+                  <th>Class</th>
+                  <th>Sex</th>
+                  <th className="num">Age</th>
+                  <th>Guardian</th>
+                  <th>Guardian phone</th>
+                  <th>Status</th>
+                  {showFees && <th className="num">Balance</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ student, schoolClass, guardian }) => {
+                  const balance = balanceByStudent.get(student.id) ?? 0;
+                  return (
+                    <tr key={student.id}>
+                      <td>
+                        <span className="person">
+                          <Avatar name={studentFullName(student)} size="small" />
+                          <Link href={`${base}/students/${admissionNoToSlug(student.admissionNo)}`}>{studentRegisterName(student)}</Link>
+                        </span>
+                      </td>
+                      <td className="mono">{student.admissionNo}</td>
+                      <td className="nowrap">{schoolClass?.name}</td>
+                      <td>{student.gender}</td>
+                      <td className="num">{ageOn(student.dateOfBirth, today)}</td>
+                      <td>{guardian ? `${guardian.title} ${guardian.name}` : ''}</td>
+                      <td className="mono nowrap">{guardian?.phone ?? <span className="warn" style={{ fontFamily: 'var(--font-sans)' }}>No phone</span>}</td>
+                      <td>
+                        <StudentStatusTag status={student.status} />
+                      </td>
+                      {showFees && <td className={balance > 0 ? 'num bad' : 'num'}>{formatBalance(balance)}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <Pagination page={page} total={total} basePath={`${base}/students`} params={{ q: filters.q, class: filters.class, status }} />
+          </>
         )}
       </div>
     </>

@@ -1,21 +1,24 @@
+import { eq } from 'drizzle-orm';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { db } from '@/db/client';
+import { enrolments, teachingAssignments } from '@/db/schema';
 import { termAttendanceTotals } from '@/features/attendance/queries';
 import { attendanceRate } from '@/features/attendance/summary';
 import { allow, canViewClass } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
+import { ClassTeacherField, RoomField } from '@/features/classes/ClassFields';
+import { updateClass } from '@/features/classes/actions';
 import { todayIso } from '@/features/school/calendar';
 import { getClass, getStaff, getSubjects } from '@/features/school/queries';
 import { staffName } from '@/features/staff/names';
+import { StudentStatusTag } from '@/features/students/StudentStatusTag';
 import { admissionNoToSlug, studentRegisterName } from '@/features/students/names';
 import { listStudents } from '@/features/students/queries';
-import { StudentStatusTag } from '@/features/students/StudentStatusTag';
-import { db } from '@/db/client';
-import { enrolments, teachingAssignments } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { ageOn, formatPercent } from '@/ui/format';
+import { ActionForm } from '@/ui/ActionForm';
 import { PageHeader } from '@/ui/PageHeader';
 import { Section } from '@/ui/Section';
+import { ageOn, formatPercent } from '@/ui/format';
 
 export default async function ClassPage({ params }: { params: Promise<{ school: string; classId: string }> }) {
   const { school, classId } = await params;
@@ -92,7 +95,17 @@ export default async function ClassPage({ params }: { params: Promise<{ school: 
           </tbody>
         </table>
       </div>
-      <Section title="Subject teachers">
+      {viewer.role === 'headteacher' && (
+        <Section title="Class details" icon="edit">
+          <ActionForm action={updateClass.bind(null, school, classId)} submitLabel="Save class details">
+            <div className="form-grid" style={{ maxWidth: 640 }}>
+              <ClassTeacherField staff={staff} value={schoolClass.classTeacherId} />
+              <RoomField value={schoolClass.room} />
+            </div>
+          </ActionForm>
+        </Section>
+      )}
+      <Section title="Subject teachers" icon="subject">
         <div className="table-wrap" style={{ maxWidth: 640 }}>
           <table className="table">
             <tbody>

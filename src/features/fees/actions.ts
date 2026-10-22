@@ -1,14 +1,17 @@
 'use server';
 
 import { and, eq, sql } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { db } from '@/db/client';
 import { feePayments, receiptCounters, scholarships, students } from '@/db/schema';
+import { recordActivity } from '@/features/activity/record';
 import { canManageFees, canRecordPayments } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
 import { todayIso } from '@/features/school/calendar';
+import { studentFullName } from '@/features/students/names';
 import { slugToAdmissionNo } from '@/features/students/names';
+import { schoolChanged } from '@/lib/revalidate';
+import { formatMoney } from '@/ui/format';
 import { roundMoney } from './accounts';
 import { paymentMethods, type PaymentMethod } from './types';
 
@@ -63,7 +66,8 @@ export async function recordPayment(schoolSlug: string, studentId: string, _prev
     return created;
   });
 
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  await recordActivity(viewer, 'Fees', `Recorded ${payment.receiptNo}, ${formatMoney(amount)} for ${studentFullName(student)} (${student.admissionNo})`, `/fees/receipts/${payment.id}`);
+  schoolChanged(viewer);
   redirect(`/${schoolSlug}/fees/receipts/${payment.id}?recorded=1`);
 }
 
@@ -76,7 +80,9 @@ export async function voidPayment(schoolSlug: string, paymentId: string, _previo
     .update(feePayments)
     .set({ voidedOn: todayIso(), voidedBy: viewer.staff?.id ?? null, voidReason: reason })
     .where(and(eq(feePayments.schoolId, viewer.school.id), eq(feePayments.id, paymentId)));
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  const [voided] = await db.select({ receiptNo: feePayments.receiptNo }).from(feePayments).where(eq(feePayments.id, paymentId));
+  await recordActivity(viewer, 'Fees', `Voided ${voided?.receiptNo ?? 'a receipt'}: ${reason}`, `/fees/receipts/${paymentId}`);
+  schoolChanged(viewer);
   return {};
 }
 
@@ -110,6 +116,7 @@ export async function addScholarship(schoolSlug: string, _previous: FormState, f
     approvedBy: viewer.staff?.id ?? null,
     notes: values.notes || null,
   });
-  revalidatePath(`/${schoolSlug}`, 'layout');
+  await recordActivity(viewer, 'Fees', `Added scholarship "${values.name}" for ${studentFullName(student)} (${student.admissionNo})`, '/fees/scholarships');
+  schoolChanged(viewer);
   redirect(`/${schoolSlug}/fees/scholarships?added=1`);
 }

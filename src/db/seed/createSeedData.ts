@@ -1,7 +1,7 @@
 import type { AttendanceStatus } from '@/features/attendance/types';
 import { feeAccountHistory, roundMoney, type FeeLedgerInput } from '@/features/fees/accounts';
 import type { FeeItem, FeePayment, PaymentMethod } from '@/features/fees/types';
-import { addDays, schoolDaysBetween, termsOfYear } from '@/features/school/calendar';
+import { addDays, schoolDaysBetween, termsOfYear, todayIso } from '@/features/school/calendar';
 import { PROMOTION_PASS_MARK, totalScore } from '@/features/school/grading';
 import { subjectsFor } from '@/features/school/subjects';
 import type { SchoolClass, Term } from '@/features/school/types';
@@ -13,13 +13,18 @@ import { femaleFirstNames, maleFirstNames } from './names';
 import { DEMO_PASSWORD, seedClasses, seedStaff, seedStaffAccounts, seedTeachingAssignments } from './seedStaffAndClasses';
 import { StudentFactory } from './seedStudents';
 
-export const SEED_TODAY = '2026-10-21';
+// The demo follows the real date inside the 1st term, so attendance and payments look current when it is opened.
+export const SEED_TODAY = process.env.SEED_TODAY ?? clampDate(todayIso(), '2026-10-21', '2026-12-16');
 const CURRENT_TERM_ID = '2026-27-T1';
 const HEADTEACHER_ID = 'STF/003';
 const BURSAR_ID = 'STF/011';
 const ACCOUNTS_CLERK_ID = 'STF/024';
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+function clampDate(isoDate: string, earliest: string, latest: string): string {
+  return isoDate < earliest ? earliest : isoDate > latest ? latest : isoDate;
+}
 
 export function createSeedData(): SeedDataset {
   const random = createRandom(20260908);

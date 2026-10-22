@@ -17,3 +17,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const actual = await scryptAsync(password, Buffer.from(saltHex, 'hex'), expected.length);
   return timingSafeEqual(actual, expected);
 }
+
+// Letters and digits that cannot be confused when read aloud or copied from paper (no 0/O, 1/l/I).
+const TEMPORARY_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+
+export function generateTemporaryPassword(length = 10): string {
+  const bytes = randomBytes(length);
+  return Array.from(bytes, (b) => TEMPORARY_ALPHABET[b % TEMPORARY_ALPHABET.length]).join('');
+}
+

@@ -1,14 +1,14 @@
-import Link from 'next/link';
 import { and, desc, eq } from 'drizzle-orm';
+import Link from 'next/link';
 import { db } from '@/db/client';
 import { studentMovements } from '@/db/schema';
-import { canRecordExits } from '@/features/auth/permissions';
+import { canAdmitStudents, canRecordExits } from '@/features/auth/permissions';
 import { requireViewer } from '@/features/auth/session';
 import { todayIso } from '@/features/school/calendar';
 import { loadStudent } from '@/features/students/loadStudent';
 import { studentEnrolments } from '@/features/students/queries';
-import { ageOn, formatDate } from '@/ui/format';
 import { Section } from '@/ui/Section';
+import { ageOn, formatDate } from '@/ui/format';
 
 export default async function StudentProfilePage({ params }: { params: Promise<{ school: string; student: string }> }) {
   const { school, student: slug } = await params;
@@ -22,7 +22,7 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
   return (
     <>
       <div className="two-col">
-        <Section title="Student">
+        <Section title="Student" icon="person" aside={canAdmitStudents(viewer) && <Link href={`/${school}/students/${slug}/edit`}>Edit details</Link>}>
           <dl className="panel detail-grid">
             <div>
               <dt>Date of birth</dt>
